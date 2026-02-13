@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import logging
 import os
+import re
 from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -66,7 +67,10 @@ def _get_path(env_value: str | None, default_path: Path) -> Path:
 def _normalize_key(key: str) -> str:
     """Normalize config keys to uppercase underscore form."""
 
-    return key.strip().replace("-", "_").replace(".", "_").upper()
+    normalized = key.strip().replace("-", "_").replace(".", "_").replace(" ", "_")
+    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", normalized)
+    normalized = re.sub(r"_+", "_", normalized)
+    return normalized.upper()
 
 
 def _normalize_secrets(secrets: Mapping[str, Any] | None) -> dict[str, str]:
@@ -105,11 +109,19 @@ def _read_setting(
     alias_keys = _SETTING_ALIASES.get(normalized_key, ())
     candidates = (normalized_key, *alias_keys)
 
-    for candidate in candidates:
-        if secrets and candidate in secrets:
-            value = secrets[candidate]
-            if value is not None and str(value).strip():
-                return str(value)
+    if secrets:
+        compact_lookup = {re.sub(r"[^A-Z0-9]", "", key): key for key in secrets.keys()}
+        for candidate in candidates:
+            if candidate in secrets:
+                value = secrets[candidate]
+                if value is not None and str(value).strip():
+                    return str(value)
+            compact_candidate = re.sub(r"[^A-Z0-9]", "", candidate)
+            compact_key = compact_lookup.get(compact_candidate)
+            if compact_key:
+                value = secrets[compact_key]
+                if value is not None and str(value).strip():
+                    return str(value)
 
     for candidate in candidates:
         value = os.getenv(candidate)
@@ -264,7 +276,12 @@ def validate_settings(settings: Settings) -> None:
     if not settings.openai_base_url.strip():
         missing.append("OPENAI_BASE_URL")
     if not settings.openai_api_key.strip():
-        missing.append("OPENAI_API_KEY")
+        if provider == "openrouter":
+            missing.append("OPENAI_API_KEY (or OPENROUTER_API_KEY)")
+        elif provider == "groq":
+            missing.append("OPENAI_API_KEY (or GROQ_API_KEY)")
+        else:
+            missing.append("OPENAI_API_KEY")
     if not settings.openai_model.strip():
         missing.append("OPENAI_MODEL")
 

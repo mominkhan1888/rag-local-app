@@ -91,6 +91,7 @@ class SettingsTests(unittest.TestCase):
             settings_module.validate_settings(settings)
 
         self.assertIn("OPENAI_API_KEY", str(error.exception))
+        self.assertIn("OPENROUTER_API_KEY", str(error.exception))
 
     def test_validate_settings_ollama_mode(self) -> None:
         """Ollama mode should validate when required values exist."""
@@ -161,6 +162,26 @@ class SettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.llm_provider, "openrouter")
         self.assertEqual(settings.openai_api_key, "nested-key")
+        self.assertEqual(settings.openai_base_url, "https://openrouter.ai/api/v1")
+        self.assertEqual(settings.openai_model, "openrouter/free")
+
+    def test_get_settings_accepts_camel_case_nested_secrets(self) -> None:
+        """CamelCase nested secret keys should map to expected settings names."""
+
+        self._clear_app_env()
+        secrets = {
+            "openrouter": {
+                "apiKey": "camel-key",
+                "baseUrl": "https://openrouter.ai/api/v1",
+                "model": "openrouter/free",
+            },
+            "llm": {"provider": "openrouter"},
+        }
+
+        settings = settings_module.get_settings(secrets=secrets)
+
+        self.assertEqual(settings.llm_provider, "openrouter")
+        self.assertEqual(settings.openai_api_key, "camel-key")
         self.assertEqual(settings.openai_base_url, "https://openrouter.ai/api/v1")
         self.assertEqual(settings.openai_model, "openrouter/free")
 
