@@ -1,0 +1,21 @@
+# Python virtual environment
+.venv/
+venv/
+env/
+
+# Environment & secrets
+.env
+.env.*
+
+# Local data storage
+data/uploads/
+data/chroma_db/
+data/chat_history.json
+
+# Python caches
+__pycache__/
+.pytest_cache/
+
+# OS junk
+.DS_Store
+Thumbs.db

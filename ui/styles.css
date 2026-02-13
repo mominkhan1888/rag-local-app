@@ -1,0 +1,149 @@
+:root {
+  --bg-1: #f6f1ea;
+  --bg-2: #e6ded0;
+  --accent: #0f4c5c;
+  --accent-soft: #e0f1f4;
+  --text: #1c1c1c;
+  --muted: #5a5a5a;
+  --card: #ffffff;
+  --border: #d4cfc6;
+  --shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+}
+
+.stApp {
+  background: radial-gradient(circle at top left, var(--bg-1), var(--bg-2));
+  color: var(--text);
+  font-family: "IBM Plex Sans", "Segoe UI", Tahoma, sans-serif;
+}
+
+.main .block-container {
+  max-width: 980px;
+  padding-top: 1.5rem;
+  padding-bottom: 2rem;
+}
+
+h1, h2, h3 {
+  letter-spacing: -0.02em;
+}
+
+.stButton > button {
+  min-height: 44px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #ffffff;
+  border: none;
+  padding: 0.5rem 1rem;
+  box-shadow: var(--shadow);
+}
+
+.stButton > button:hover {
+  background: #0b3945;
+  color: #ffffff;
+}
+
+.stFileUploader {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.5rem;
+  box-shadow: var(--shadow);
+}
+
+.stChatMessage {
+  background: var(--card);
+  border-radius: 14px;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+}
+
+.stTextInput > div > div > input,
+.stTextArea > div > textarea {
+  font-size: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #ffffff;
+}
+
+[data-testid="stSidebar"] {
+  background: linear-gradient(180deg, #faf7f2, #f0e9dd);
+  border-right: 1px solid var(--border);
+}
+
+[data-testid="stSidebar"] * {
+  color: var(--text) !important;
+}
+
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3,
+[data-testid="stSidebar"] h4,
+[data-testid="stSidebar"] h5,
+[data-testid="stSidebar"] h6 {
+  color: var(--text) !important;
+}
+
+[data-testid="stSidebar"] .stButton > button {
+  background: var(--accent) !important;
+  color: #ffffff !important;
+}
+
+[data-testid="stSidebar"] .stButton > button:hover {
+  background: #0b3945 !important;
+}
+
+[data-testid="stSidebar"] .stFileUploader,
+[data-testid="stSidebar"] .stFileUploader * {
+  color: var(--text) !important;
+}
+
+[data-testid="stSidebar"] .stCaption {
+  color: var(--muted) !important;
+}
+
+@media (max-width: 480px) {
+  .main .block-container {
+    padding: 1rem 0.75rem;
+  }
+
+  .stButton > button {
+    width: 100%;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-1: #121416;
+    --bg-2: #1a1c1f;
+    --accent: #8ecae6;
+    --accent-soft: #1d2b33;
+    --text: #f4f4f4;
+    --muted: #b8b8b8;
+    --card: #1f2226;
+    --border: #2f3338;
+    --shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  }
+
+  .stApp {
+    color: var(--text);
+  }
+
+  .stTextInput > div > div > input,
+  .stTextArea > div > textarea {
+    background: #1a1c1f;
+    color: var(--text);
+  }
+
+  [data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #15181b, #1a1d21);
+    border-right: 1px solid var(--border);
+  }
+
+  [data-testid="stSidebar"] * {
+    color: var(--text) !important;
+  }
+
+  [data-testid="stSidebar"] .stButton > button {
+    background: var(--accent) !important;
+    color: #0b0f12 !important;
+  }
+}
