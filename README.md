@@ -40,6 +40,19 @@ OPENAI_API_KEY="YOUR_OPENROUTER_KEY"
 OPENAI_MODEL="openrouter/free"
 ```
 
+Alias keys are also supported:
+- `OPENROUTER_API_KEY` (instead of `OPENAI_API_KEY`)
+- `OPENROUTER_BASE_URL` (instead of `OPENAI_BASE_URL`)
+- `OPENROUTER_MODEL` (instead of `OPENAI_MODEL`)
+
+Nested secrets are supported too, for example:
+```toml
+[openrouter]
+api_key="YOUR_OPENROUTER_KEY"
+base_url="https://openrouter.ai/api/v1"
+model="openrouter/free"
+```
+
 Notes:
 - `.env` is optional on Streamlit Cloud.
 - The app reads Streamlit `st.secrets` directly (no `.env` required).
@@ -93,6 +106,7 @@ http://192.168.1.25:8501
 ## Troubleshooting
 - **Ollama not running**: Start Ollama and re-try. Verify `http://localhost:11434` is reachable.
 - **`Failed to connect to Ollama` on Streamlit Cloud**: Cloud cannot access your local Ollama. Set the OpenRouter secrets above and reboot the app.
+- **`Missing required settings ... OPENAI_API_KEY`**: Add `OPENAI_API_KEY` (or `OPENROUTER_API_KEY`) in Streamlit Cloud Secrets, then reboot the app.
 - **Model missing**: Run `ollama pull llama3.2:3b`.
 - **Slow indexing**: Large PDFs can take 30-60 seconds; this is expected for 500 pages.
 - **Mobile cannot connect**: Ensure the laptop firewall allows port 8501 and both devices are on the same WiFi.

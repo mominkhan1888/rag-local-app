@@ -34,6 +34,12 @@ class SettingsTests(unittest.TestCase):
             "OPENAI_BASE_URL",
             "OPENAI_API_KEY",
             "OPENAI_MODEL",
+            "OPENROUTER_BASE_URL",
+            "OPENROUTER_API_KEY",
+            "OPENROUTER_MODEL",
+            "GROQ_BASE_URL",
+            "GROQ_API_KEY",
+            "GROQ_MODEL",
             "EMBEDDING_MODEL",
             "CHROMA_DB_PATH",
             "UPLOAD_DIR",
@@ -122,6 +128,41 @@ class SettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.llm_provider, "openrouter")
         self.assertEqual(settings.top_k, 7)
+
+    def test_get_settings_accepts_openrouter_aliases(self) -> None:
+        """OpenRouter alias keys should map to OpenAI-compatible settings."""
+
+        self._clear_app_env()
+        os.environ["OPENROUTER_API_KEY"] = "alias-key"
+        os.environ["OPENROUTER_BASE_URL"] = "https://openrouter.ai/api/v1"
+        os.environ["OPENROUTER_MODEL"] = "openrouter/free"
+
+        settings = settings_module.get_settings()
+
+        self.assertEqual(settings.llm_provider, "openrouter")
+        self.assertEqual(settings.openai_api_key, "alias-key")
+        self.assertEqual(settings.openai_base_url, "https://openrouter.ai/api/v1")
+        self.assertEqual(settings.openai_model, "openrouter/free")
+
+    def test_get_settings_accepts_nested_streamlit_secrets(self) -> None:
+        """Nested secrets tables should be flattened into config values."""
+
+        self._clear_app_env()
+        secrets = {
+            "llm": {"provider": "openrouter"},
+            "openrouter": {
+                "api_key": "nested-key",
+                "base_url": "https://openrouter.ai/api/v1",
+                "model": "openrouter/free",
+            },
+        }
+
+        settings = settings_module.get_settings(secrets=secrets)
+
+        self.assertEqual(settings.llm_provider, "openrouter")
+        self.assertEqual(settings.openai_api_key, "nested-key")
+        self.assertEqual(settings.openai_base_url, "https://openrouter.ai/api/v1")
+        self.assertEqual(settings.openai_model, "openrouter/free")
 
     def test_invalid_integer_uses_default(self) -> None:
         """Invalid integer settings should fall back to defaults."""

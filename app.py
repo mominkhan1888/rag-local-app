@@ -57,9 +57,11 @@ def load_css() -> None:
 
 
 def load_streamlit_secrets() -> dict:
-    """Load root-level Streamlit secrets into a plain dictionary."""
+    """Load Streamlit secrets into a plain dictionary."""
 
     try:
+        if hasattr(st.secrets, "to_dict"):
+            return st.secrets.to_dict()  # type: ignore[no-any-return]
         return {key: st.secrets[key] for key in st.secrets.keys()}
     except Exception:  # noqa: BLE001
         return {}
@@ -294,8 +296,8 @@ def main() -> None:
         st.error("Configuration error")
         st.error(str(exc))
         st.info(
-            "For Streamlit Cloud, set secrets for OPENAI_BASE_URL, OPENAI_API_KEY, "
-            "OPENAI_MODEL, and optionally LLM_PROVIDER=openrouter."
+            "For Streamlit Cloud, set secrets for OPENAI_BASE_URL, OPENAI_MODEL, and "
+            "OPENAI_API_KEY (or OPENROUTER_API_KEY), plus optionally LLM_PROVIDER=openrouter."
         )
         st.stop()
 

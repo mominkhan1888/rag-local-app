@@ -12,6 +12,13 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BASE_DIR / "data"
 logger = logging.getLogger(__name__)
 
+_SETTING_ALIASES: dict[str, tuple[str, ...]] = {
+    "OPENAI_API_KEY": ("OPENROUTER_API_KEY", "GROQ_API_KEY"),
+    "OPENAI_BASE_URL": ("OPENROUTER_BASE_URL", "GROQ_BASE_URL"),
+    "OPENAI_MODEL": ("OPENROUTER_MODEL", "GROQ_MODEL"),
+    "MODEL_NAME": ("OLLAMA_MODEL",),
+}
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -56,6 +63,37 @@ def _get_path(env_value: str | None, default_path: Path) -> Path:
     return default_path
 
 
+def _normalize_key(key: str) -> str:
+    """Normalize config keys to uppercase underscore form."""
+
+    return key.strip().replace("-", "_").replace(".", "_").upper()
+
+
+def _normalize_secrets(secrets: Mapping[str, Any] | None) -> dict[str, str]:
+    """Flatten nested Streamlit secrets into uppercase underscore keys."""
+
+    normalized: dict[str, str] = {}
+    if not secrets:
+        return normalized
+
+    def _walk(prefix: str, value: Any) -> None:
+        if isinstance(value, Mapping):
+            for child_key, child_value in value.items():
+                key_part = _normalize_key(str(child_key))
+                next_prefix = f"{prefix}_{key_part}" if prefix else key_part
+                _walk(next_prefix, child_value)
+            return
+
+        if value is None:
+            return
+        normalized[prefix] = str(value)
+
+    for root_key, root_value in secrets.items():
+        _walk(_normalize_key(str(root_key)), root_value)
+
+    return normalized
+
+
 def _read_setting(
     key: str,
     default: str,
@@ -63,9 +101,22 @@ def _read_setting(
 ) -> str:
     """Read a value from secrets first, then environment variables."""
 
-    if secrets and key in secrets and secrets[key] is not None:
-        return str(secrets[key])
-    return os.getenv(key, default)
+    normalized_key = _normalize_key(key)
+    alias_keys = _SETTING_ALIASES.get(normalized_key, ())
+    candidates = (normalized_key, *alias_keys)
+
+    for candidate in candidates:
+        if secrets and candidate in secrets:
+            value = secrets[candidate]
+            if value is not None and str(value).strip():
+                return str(value)
+
+    for candidate in candidates:
+        value = os.getenv(candidate)
+        if value is not None and value.strip():
+            return value
+
+    return default
 
 
 def _read_int_setting(
@@ -147,47 +198,49 @@ def _default_openai_model(provider: str) -> str:
 def get_settings(secrets: Mapping[str, Any] | None = None) -> Settings:
     """Load settings from the environment with sane defaults."""
 
-    openai_api_key = _read_setting("OPENAI_API_KEY", "", secrets).strip()
+    normalized_secrets = _normalize_secrets(secrets)
+
+    openai_api_key = _read_setting("OPENAI_API_KEY", "", normalized_secrets).strip()
     provider = _resolve_llm_provider(
-        _read_setting("LLM_PROVIDER", "", secrets),
+        _read_setting("LLM_PROVIDER", "", normalized_secrets),
         openai_api_key,
-        secrets,
+        normalized_secrets,
     )
 
-    openai_base_url = _read_setting("OPENAI_BASE_URL", "", secrets).strip().rstrip("/")
+    openai_base_url = _read_setting("OPENAI_BASE_URL", "", normalized_secrets).strip().rstrip("/")
     if not openai_base_url:
         openai_base_url = _default_openai_base_url(provider)
 
-    openai_model = _read_setting("OPENAI_MODEL", "", secrets).strip()
+    openai_model = _read_setting("OPENAI_MODEL", "", normalized_secrets).strip()
     if not openai_model:
         openai_model = _default_openai_model(provider)
 
     return Settings(
-        chunk_size=_read_int_setting("CHUNK_SIZE", 1000, secrets),
-        chunk_overlap=_read_int_setting("CHUNK_OVERLAP", 200, secrets),
-        model_name=_read_setting("MODEL_NAME", "llama3.2:3b", secrets).strip(),
+        chunk_size=_read_int_setting("CHUNK_SIZE", 1000, normalized_secrets),
+        chunk_overlap=_read_int_setting("CHUNK_OVERLAP", 200, normalized_secrets),
+        model_name=_read_setting("MODEL_NAME", "llama3.2:3b", normalized_secrets).strip(),
         llm_provider=provider,
         openai_base_url=openai_base_url,
         openai_api_key=openai_api_key,
         openai_model=openai_model,
-        embedding_model=_read_setting("EMBEDDING_MODEL", "all-MiniLM-L6-v2", secrets).strip(),
+        embedding_model=_read_setting("EMBEDDING_MODEL", "all-MiniLM-L6-v2", normalized_secrets).strip(),
         chroma_db_path=_get_path(
-            _read_setting("CHROMA_DB_PATH", "", secrets).strip() or None,
+            _read_setting("CHROMA_DB_PATH", "", normalized_secrets).strip() or None,
             DATA_DIR / "chroma_db",
         ),
         upload_dir=_get_path(
-            _read_setting("UPLOAD_DIR", "", secrets).strip() or None,
+            _read_setting("UPLOAD_DIR", "", normalized_secrets).strip() or None,
             DATA_DIR / "uploads",
         ),
-        ollama_base_url=_read_setting("OLLAMA_BASE_URL", "http://localhost:11434", secrets).strip(),
-        top_k=_read_int_setting("TOP_K", 4, secrets),
-        request_timeout_seconds=_read_int_setting("REQUEST_TIMEOUT_SECONDS", 180, secrets),
-        embedding_batch_size=_read_int_setting("EMBEDDING_BATCH_SIZE", 32, secrets),
+        ollama_base_url=_read_setting("OLLAMA_BASE_URL", "http://localhost:11434", normalized_secrets).strip(),
+        top_k=_read_int_setting("TOP_K", 4, normalized_secrets),
+        request_timeout_seconds=_read_int_setting("REQUEST_TIMEOUT_SECONDS", 180, normalized_secrets),
+        embedding_batch_size=_read_int_setting("EMBEDDING_BATCH_SIZE", 32, normalized_secrets),
         chat_history_path=_get_path(
-            _read_setting("CHAT_HISTORY_PATH", "", secrets).strip() or None,
+            _read_setting("CHAT_HISTORY_PATH", "", normalized_secrets).strip() or None,
             DATA_DIR / "chat_history.json",
         ),
-        chat_history_max_messages=_read_int_setting("CHAT_HISTORY_MAX_MESSAGES", 12, secrets),
+        chat_history_max_messages=_read_int_setting("CHAT_HISTORY_MAX_MESSAGES", 12, normalized_secrets),
     )
 
 
