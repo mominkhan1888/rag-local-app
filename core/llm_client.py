@@ -10,6 +10,21 @@ import requests
 logger = logging.getLogger(__name__)
 
 
+def check_ollama_health(base_url: str, timeout_seconds: int = 3) -> tuple[bool, str]:
+    """Check whether an Ollama server is reachable."""
+
+    clean_base_url = base_url.rstrip("/")
+    try:
+        response = requests.get(
+            f"{clean_base_url}/api/tags",
+            timeout=(2, timeout_seconds),
+        )
+        response.raise_for_status()
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+    return True, ""
+
+
 class BaseLLMClient:
     """Shared prompt builder for LLM clients."""
 
@@ -92,7 +107,11 @@ class OllamaClient(BaseLLMClient):
             response.raise_for_status()
         except Exception as exc:  # noqa: BLE001
             logger.exception("Failed to connect to Ollama")
-            raise RuntimeError("Failed to connect to Ollama. Is it running?") from exc
+            raise RuntimeError(
+                "Failed to connect to Ollama at "
+                f"{self.base_url}. Start Ollama locally, or set an internet provider "
+                "(LLM_PROVIDER=openrouter + OPENAI_* settings) for cloud deployment."
+            ) from exc
 
         try:
             for line in response.iter_lines():

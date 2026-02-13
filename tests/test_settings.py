@@ -44,6 +44,7 @@ class SettingsTests(unittest.TestCase):
             "CHAT_HISTORY_PATH",
             "CHAT_HISTORY_MAX_MESSAGES",
             "STREAMLIT_SHARING_MODE",
+            "IS_STREAMLIT_CLOUD",
         ]
         for key in keys:
             os.environ.pop(key, None)
@@ -95,6 +96,42 @@ class SettingsTests(unittest.TestCase):
 
         settings = settings_module.get_settings()
         settings_module.validate_settings(settings)
+
+    def test_provider_defaults_openrouter_when_openai_key_exists(self) -> None:
+        """Provider should default to OpenRouter when API key is present."""
+
+        self._clear_app_env()
+        os.environ["OPENAI_API_KEY"] = "test-key"
+
+        settings = settings_module.get_settings()
+
+        self.assertEqual(settings.llm_provider, "openrouter")
+
+    def test_get_settings_reads_explicit_secrets_mapping(self) -> None:
+        """Settings should read values passed from Streamlit secrets."""
+
+        self._clear_app_env()
+        secrets = {
+            "OPENAI_API_KEY": "secret-key",
+            "OPENAI_BASE_URL": "https://openrouter.ai/api/v1",
+            "OPENAI_MODEL": "openrouter/free",
+            "TOP_K": "7",
+        }
+
+        settings = settings_module.get_settings(secrets=secrets)
+
+        self.assertEqual(settings.llm_provider, "openrouter")
+        self.assertEqual(settings.top_k, 7)
+
+    def test_invalid_integer_uses_default(self) -> None:
+        """Invalid integer settings should fall back to defaults."""
+
+        self._clear_app_env()
+        os.environ["CHUNK_SIZE"] = "not-a-number"
+
+        settings = settings_module.get_settings()
+
+        self.assertEqual(settings.chunk_size, 1000)
 
 
 if __name__ == "__main__":

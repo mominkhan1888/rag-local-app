@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import logging
+import threading
 import time
 from typing import Callable, Iterator, List
 
@@ -23,15 +24,9 @@ class RAGService:
 
         self.settings = settings
         self._pdf_processor = PDFProcessor(settings.chunk_size, settings.chunk_overlap)
-        self._embedder = EmbeddingGenerator(
-            EmbeddingConfig(
-                model_name=settings.embedding_model,
-                batch_size=settings.embedding_batch_size,
-            )
-        )
-        self._vector_store = VectorStore(
-            VectorStoreConfig(persist_path=settings.chroma_db_path)
-        )
+        self._embedder: EmbeddingGenerator | None = None
+        self._vector_store: VectorStore | None = None
+        self._dependency_lock = threading.Lock()
         provider = settings.llm_provider.lower()
         if provider == "ollama":
             self._llm_client = OllamaClient(
@@ -55,6 +50,35 @@ class RAGService:
                 request_timeout_seconds=settings.request_timeout_seconds,
             )
 
+    def _get_embedder(self) -> EmbeddingGenerator:
+        """Return a lazily initialized embedding generator."""
+
+        if self._embedder is not None:
+            return self._embedder
+
+        with self._dependency_lock:
+            if self._embedder is None:
+                self._embedder = EmbeddingGenerator(
+                    EmbeddingConfig(
+                        model_name=self.settings.embedding_model,
+                        batch_size=self.settings.embedding_batch_size,
+                    )
+                )
+        return self._embedder
+
+    def _get_vector_store(self) -> VectorStore:
+        """Return a lazily initialized vector store."""
+
+        if self._vector_store is not None:
+            return self._vector_store
+
+        with self._dependency_lock:
+            if self._vector_store is None:
+                self._vector_store = VectorStore(
+                    VectorStoreConfig(persist_path=self.settings.chroma_db_path)
+                )
+        return self._vector_store
+
     def index_pdf(
         self,
         pdf_path: Path,
@@ -75,20 +99,20 @@ class RAGService:
             return 0
 
         try:
-            deleted = self._vector_store.delete_pdf(pdf_name)
+            deleted = self._get_vector_store().delete_pdf(pdf_name)
             if deleted:
                 logger.info("Cleared %s existing chunks for %s", deleted, pdf_name)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Could not clear existing PDF data for %s: %s", pdf_name, exc)
 
         try:
-            embeddings = self._embedder.embed_texts([chunk.text for chunk in chunks])
+            embeddings = self._get_embedder().embed_texts([chunk.text for chunk in chunks])
         except Exception as exc:  # noqa: BLE001
             logger.exception("Embedding generation failed")
             raise RuntimeError(f"Failed to generate embeddings: {exc}") from exc
 
         try:
-            added = self._vector_store.add_chunks(chunks, embeddings)
+            added = self._get_vector_store().add_chunks(chunks, embeddings)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Vector store write failed")
             raise RuntimeError(f"Failed to store embeddings: {exc}") from exc
@@ -107,8 +131,8 @@ class RAGService:
 
         retrieval_start = time.perf_counter()
         try:
-            query_embedding = self._embedder.embed_query(question)
-            matches = self._vector_store.similarity_search(
+            query_embedding = self._get_embedder().embed_query(question)
+            matches = self._get_vector_store().similarity_search(
                 query_embedding,
                 top_k or self.settings.top_k,
             )
@@ -170,12 +194,12 @@ class RAGService:
     def list_pdfs(self) -> List[str]:
         """Return a sorted list of indexed PDF names."""
 
-        return self._vector_store.list_pdfs()
+        return self._get_vector_store().list_pdfs()
 
     def delete_pdf(self, pdf_name: str) -> dict:
         """Delete a PDF and all associated chunks from the vector database."""
 
-        deleted_chunks = self._vector_store.delete_pdf(pdf_name)
+        deleted_chunks = self._get_vector_store().delete_pdf(pdf_name)
         file_deleted = False
         file_missing = False
         try:

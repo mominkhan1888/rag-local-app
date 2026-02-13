@@ -8,7 +8,14 @@ import time
 
 import streamlit as st
 
-from config.settings import Settings, ensure_directories, get_settings, validate_settings
+from config.settings import (
+    Settings,
+    ensure_directories,
+    get_settings,
+    is_cloud_runtime,
+    validate_settings,
+)
+from core.llm_client import check_ollama_health
 from services.history_store import HistoryStore
 from services.queue_manager import QueueManager, RequestHandle
 from services.rag_service import RAGService
@@ -47,6 +54,68 @@ def load_css() -> None:
     css_path = Path(__file__).parent / "ui" / "styles.css"
     if css_path.exists():
         st.markdown(f"<style>{css_path.read_text()}</style>", unsafe_allow_html=True)
+
+
+def load_streamlit_secrets() -> dict:
+    """Load root-level Streamlit secrets into a plain dictionary."""
+
+    try:
+        return {key: st.secrets[key] for key in st.secrets.keys()}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def get_cached_ollama_health(base_url: str) -> tuple[bool, str]:
+    """Check Ollama health with short-lived caching per session."""
+
+    now = time.time()
+    cached = st.session_state.get("ollama_health")
+    if (
+        isinstance(cached, dict)
+        and cached.get("base_url") == base_url
+        and (now - float(cached.get("checked_at", 0))) < 15
+    ):
+        return bool(cached.get("ok")), str(cached.get("reason", ""))
+
+    ok, reason = check_ollama_health(base_url)
+    st.session_state["ollama_health"] = {
+        "base_url": base_url,
+        "checked_at": now,
+        "ok": ok,
+        "reason": reason,
+    }
+    return ok, reason
+
+
+def guard_ollama_runtime(settings: Settings, running_in_cloud: bool) -> None:
+    """Show actionable guidance when Ollama is unreachable."""
+
+    if settings.llm_provider.lower() != "ollama":
+        return
+
+    is_healthy, reason = get_cached_ollama_health(settings.ollama_base_url)
+    if is_healthy:
+        return
+
+    if running_in_cloud:
+        st.error(
+            "This deployment is configured for Ollama, but Streamlit Cloud cannot reach your local Ollama service."
+        )
+        st.info(
+            "Set cloud secrets for an internet LLM provider:\n\n"
+            "LLM_PROVIDER=openrouter\n"
+            "OPENAI_BASE_URL=https://openrouter.ai/api/v1\n"
+            "OPENAI_API_KEY=YOUR_KEY\n"
+            "OPENAI_MODEL=openrouter/free"
+        )
+        st.stop()
+
+    st.warning(
+        f"Ollama is not reachable at {settings.ollama_base_url}. "
+        "Start Ollama (`ollama serve`) and ensure the model is pulled."
+    )
+    if reason:
+        st.caption(f"Connection detail: {reason}")
 
 
 def ensure_session_state(history_store: HistoryStore) -> None:
@@ -216,7 +285,9 @@ def main() -> None:
     st.set_page_config(page_title="Local RAG", layout="wide")
     load_css()
 
-    settings = get_settings()
+    secrets = load_streamlit_secrets()
+    settings = get_settings(secrets=secrets)
+    running_in_cloud = is_cloud_runtime(secrets=secrets)
     try:
         validate_settings(settings)
     except ValueError as exc:
@@ -228,9 +299,18 @@ def main() -> None:
         )
         st.stop()
 
-    settings, rag_service, queue_manager, history_store = init_services(CACHE_VERSION, settings)
+    try:
+        settings, rag_service, queue_manager, history_store = init_services(CACHE_VERSION, settings)
+    except Exception as exc:  # noqa: BLE001
+        st.error("Startup error")
+        st.error(str(exc))
+        st.info(
+            "If this is Streamlit Cloud, use an internet provider (OpenRouter/Groq) and reboot after updating secrets."
+        )
+        st.stop()
 
     ensure_session_state(history_store)
+    guard_ollama_runtime(settings, running_in_cloud)
 
     with st.sidebar:
         st.header("PDF Library")

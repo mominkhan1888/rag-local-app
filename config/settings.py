@@ -1,12 +1,16 @@
 """Centralized configuration settings for the RAG app."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+import logging
 import os
+from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BASE_DIR / "data"
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -52,12 +56,70 @@ def _get_path(env_value: str | None, default_path: Path) -> Path:
     return default_path
 
 
-def _resolve_llm_provider(provider: str | None) -> str:
+def _read_setting(
+    key: str,
+    default: str,
+    secrets: Mapping[str, Any] | None = None,
+) -> str:
+    """Read a value from secrets first, then environment variables."""
+
+    if secrets and key in secrets and secrets[key] is not None:
+        return str(secrets[key])
+    return os.getenv(key, default)
+
+
+def _read_int_setting(
+    key: str,
+    default: int,
+    secrets: Mapping[str, Any] | None = None,
+) -> int:
+    """Read an integer setting with safe fallback."""
+
+    raw_value = _read_setting(key, str(default), secrets).strip()
+    try:
+        return int(raw_value)
+    except ValueError:
+        logger.warning("Invalid integer value for %s='%s'. Using default=%s.", key, raw_value, default)
+        return default
+
+
+def is_cloud_runtime(secrets: Mapping[str, Any] | None = None) -> bool:
+    """Return True when running in a hosted Streamlit environment."""
+
+    sharing_mode = _read_setting("STREAMLIT_SHARING_MODE", "", secrets).strip().lower()
+    if sharing_mode == "streamlit":
+        return True
+
+    explicit_cloud_flag = _read_setting("IS_STREAMLIT_CLOUD", "", secrets).strip().lower()
+    if explicit_cloud_flag in {"1", "true", "yes"}:
+        return True
+
+    home_dir = _read_setting("HOME", "", secrets).strip().lower()
+    if home_dir.startswith("/home/adminuser"):
+        return True
+
+    hostname = _read_setting("HOSTNAME", "", secrets).strip().lower()
+    if "streamlit" in hostname:
+        return True
+
+    return False
+
+
+def _resolve_llm_provider(
+    provider: str | None,
+    openai_api_key: str,
+    secrets: Mapping[str, Any] | None = None,
+) -> str:
     """Resolve provider from env with cloud-aware defaults."""
 
     if provider and provider.strip():
         return provider.strip().lower()
-    if os.getenv("STREAMLIT_SHARING_MODE", "").strip().lower() == "streamlit":
+
+    # If user provided an OpenAI-compatible key but not provider, default to openrouter.
+    if openai_api_key.strip():
+        return "openrouter"
+
+    if is_cloud_runtime(secrets):
         return "openrouter"
     return "ollama"
 
@@ -82,44 +144,50 @@ def _default_openai_model(provider: str) -> str:
     return ""
 
 
-def get_settings() -> Settings:
+def get_settings(secrets: Mapping[str, Any] | None = None) -> Settings:
     """Load settings from the environment with sane defaults."""
 
-    provider = _resolve_llm_provider(os.getenv("LLM_PROVIDER"))
-    openai_base_url = os.getenv("OPENAI_BASE_URL", "").rstrip("/")
+    openai_api_key = _read_setting("OPENAI_API_KEY", "", secrets).strip()
+    provider = _resolve_llm_provider(
+        _read_setting("LLM_PROVIDER", "", secrets),
+        openai_api_key,
+        secrets,
+    )
+
+    openai_base_url = _read_setting("OPENAI_BASE_URL", "", secrets).strip().rstrip("/")
     if not openai_base_url:
         openai_base_url = _default_openai_base_url(provider)
 
-    openai_model = os.getenv("OPENAI_MODEL", "").strip()
+    openai_model = _read_setting("OPENAI_MODEL", "", secrets).strip()
     if not openai_model:
         openai_model = _default_openai_model(provider)
 
     return Settings(
-        chunk_size=int(os.getenv("CHUNK_SIZE", "1000")),
-        chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "200")),
-        model_name=os.getenv("MODEL_NAME", "llama3.2:3b"),
+        chunk_size=_read_int_setting("CHUNK_SIZE", 1000, secrets),
+        chunk_overlap=_read_int_setting("CHUNK_OVERLAP", 200, secrets),
+        model_name=_read_setting("MODEL_NAME", "llama3.2:3b", secrets).strip(),
         llm_provider=provider,
         openai_base_url=openai_base_url,
-        openai_api_key=os.getenv("OPENAI_API_KEY", ""),
+        openai_api_key=openai_api_key,
         openai_model=openai_model,
-        embedding_model=os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
+        embedding_model=_read_setting("EMBEDDING_MODEL", "all-MiniLM-L6-v2", secrets).strip(),
         chroma_db_path=_get_path(
-            os.getenv("CHROMA_DB_PATH"),
+            _read_setting("CHROMA_DB_PATH", "", secrets).strip() or None,
             DATA_DIR / "chroma_db",
         ),
         upload_dir=_get_path(
-            os.getenv("UPLOAD_DIR"),
+            _read_setting("UPLOAD_DIR", "", secrets).strip() or None,
             DATA_DIR / "uploads",
         ),
-        ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
-        top_k=int(os.getenv("TOP_K", "4")),
-        request_timeout_seconds=int(os.getenv("REQUEST_TIMEOUT_SECONDS", "180")),
-        embedding_batch_size=int(os.getenv("EMBEDDING_BATCH_SIZE", "32")),
+        ollama_base_url=_read_setting("OLLAMA_BASE_URL", "http://localhost:11434", secrets).strip(),
+        top_k=_read_int_setting("TOP_K", 4, secrets),
+        request_timeout_seconds=_read_int_setting("REQUEST_TIMEOUT_SECONDS", 180, secrets),
+        embedding_batch_size=_read_int_setting("EMBEDDING_BATCH_SIZE", 32, secrets),
         chat_history_path=_get_path(
-            os.getenv("CHAT_HISTORY_PATH"),
+            _read_setting("CHAT_HISTORY_PATH", "", secrets).strip() or None,
             DATA_DIR / "chat_history.json",
         ),
-        chat_history_max_messages=int(os.getenv("CHAT_HISTORY_MAX_MESSAGES", "12")),
+        chat_history_max_messages=_read_int_setting("CHAT_HISTORY_MAX_MESSAGES", 12, secrets),
     )
 
 
@@ -163,6 +231,7 @@ def ensure_directories(settings: Settings) -> None:
 __all__ = [
     "Settings",
     "get_settings",
+    "is_cloud_runtime",
     "validate_settings",
     "ensure_directories",
 ]
