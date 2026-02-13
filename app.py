@@ -8,7 +8,7 @@ import time
 
 import streamlit as st
 
-from config.settings import ensure_directories, get_settings
+from config.settings import Settings, ensure_directories, get_settings, validate_settings
 from services.history_store import HistoryStore
 from services.queue_manager import QueueManager, RequestHandle
 from services.rag_service import RAGService
@@ -26,14 +26,13 @@ logging.basicConfig(
 )
 
 
-CACHE_VERSION = "v2"
+CACHE_VERSION = "v3"
 
 
 @st.cache_resource
-def init_services(cache_version: str) -> tuple:
+def init_services(cache_version: str, settings: Settings) -> tuple:
     """Initialize shared services for all Streamlit sessions."""
 
-    settings = get_settings()
     ensure_directories(settings)
     rag_service = RAGService(settings)
     queue_manager = QueueManager()
@@ -217,7 +216,19 @@ def main() -> None:
     st.set_page_config(page_title="Local RAG", layout="wide")
     load_css()
 
-    settings, rag_service, queue_manager, history_store = init_services(CACHE_VERSION)
+    settings = get_settings()
+    try:
+        validate_settings(settings)
+    except ValueError as exc:
+        st.error("Configuration error")
+        st.error(str(exc))
+        st.info(
+            "For Streamlit Cloud, set secrets for OPENAI_BASE_URL, OPENAI_API_KEY, "
+            "OPENAI_MODEL, and optionally LLM_PROVIDER=openrouter."
+        )
+        st.stop()
+
+    settings, rag_service, queue_manager, history_store = init_services(CACHE_VERSION, settings)
 
     ensure_session_state(history_store)
 

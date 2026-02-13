@@ -29,6 +29,21 @@ cp .env.example .env
 streamlit run app.py --server.address 0.0.0.0 --server.port 8501
 ```
 
+## Deploy On Streamlit Cloud
+`python-dotenv` is optional in cloud. Streamlit Cloud should use app secrets/environment variables.
+
+Set these in **Streamlit Cloud > App settings > Secrets**:
+```toml
+LLM_PROVIDER="openrouter"
+OPENAI_BASE_URL="https://openrouter.ai/api/v1"
+OPENAI_API_KEY="YOUR_OPENROUTER_KEY"
+OPENAI_MODEL="openrouter/free"
+```
+
+Notes:
+- `.env` is optional on Streamlit Cloud.
+- After changing dependencies or secrets, use **Reboot app** in Streamlit Cloud.
+
 ## Remote LLM Providers (For Free Hosting)
 This app defaults to local Ollama. For free hosting platforms, use an internet LLM API instead.
 
