@@ -33,7 +33,7 @@ logging.basicConfig(
 )
 
 
-CACHE_VERSION = "v3"
+CACHE_VERSION = "v4"
 
 
 @st.cache_resource
@@ -142,6 +142,26 @@ def ensure_session_state(history_store: HistoryStore) -> None:
         st.session_state["composer_busy"] = False
     if "composer_upload_nonce" not in st.session_state:
         st.session_state["composer_upload_nonce"] = 0
+
+
+def ensure_service_compatibility(rag_service: RAGService) -> None:
+    """Refresh cached services when runtime objects are stale after deploy."""
+
+    if hasattr(rag_service, "index_uploaded_files"):
+        st.session_state.pop("_service_compat_refreshed", None)
+        return
+
+    if not st.session_state.get("_service_compat_refreshed", False):
+        st.session_state["_service_compat_refreshed"] = True
+        st.cache_resource.clear()
+        st.rerun()
+
+    st.error("Service compatibility error")
+    st.error(
+        "The app loaded an outdated cached backend object after deployment. "
+        "Please reboot the app from Streamlit Cloud 'Manage app' and refresh."
+    )
+    st.stop()
 
 
 def get_history_state(history_store: HistoryStore) -> dict:
@@ -308,6 +328,7 @@ def main() -> None:
         )
         st.stop()
 
+    ensure_service_compatibility(rag_service)
     ensure_session_state(history_store)
     guard_ollama_runtime(settings, running_in_cloud)
 
