@@ -111,9 +111,9 @@ http://192.168.1.25:8501
 ```
 
 ## Expected Behavior
-- Upload a PDF in the sidebar and click **Index PDF**.
-- Progress displays while pages are processed and embedded.
-- Ask questions in the chat input and receive streaming answers.
+- Attach one or more PDFs in the chat composer and click **Send**.
+- Files index sequentially with inline progress and per-file status messages.
+- Ask questions in the same composer and receive streaming answers.
 - If another user is already receiving a response, you will see your queue position.
 
 ## Troubleshooting

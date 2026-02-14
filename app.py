@@ -21,8 +21,8 @@ from services.queue_manager import QueueManager, RequestHandle
 from services.rag_service import RAGService
 from ui.components import (
     create_upload_progress,
+    render_chat_composer,
     render_chat_message,
-    render_file_uploader,
     render_pdf_list,
     update_upload_progress,
 )
@@ -138,6 +138,10 @@ def ensure_session_state(history_store: HistoryStore) -> None:
         st.session_state["pending_assistant_index"] = None
     if "pending_session_id" not in st.session_state:
         st.session_state["pending_session_id"] = None
+    if "composer_busy" not in st.session_state:
+        st.session_state["composer_busy"] = False
+    if "composer_upload_nonce" not in st.session_state:
+        st.session_state["composer_upload_nonce"] = 0
 
 
 def get_history_state(history_store: HistoryStore) -> dict:
@@ -152,16 +156,6 @@ def persist_history_state(history_store: HistoryStore, state: dict) -> None:
 
     st.session_state["history_state"] = state
     history_store.save_state(state)
-
-
-def save_uploaded_file(uploaded_file: st.runtime.uploaded_file_manager.UploadedFile, upload_dir: Path) -> Path:
-    """Save an uploaded file to disk and return the file path."""
-
-    safe_name = Path(uploaded_file.name).name
-    file_path = upload_dir / safe_name
-    with open(file_path, "wb") as file_handle:
-        file_handle.write(uploaded_file.getbuffer())
-    return file_path
 
 
 def stream_pending_response(
@@ -319,24 +313,6 @@ def main() -> None:
 
     with st.sidebar:
         st.header("PDF Library")
-        uploaded_file = render_file_uploader("Upload a PDF")
-        index_clicked = st.button("Index PDF", disabled=uploaded_file is None)
-
-        if index_clicked and uploaded_file is not None:
-            progress_bar, status_text = create_upload_progress()
-            try:
-                pdf_path = save_uploaded_file(uploaded_file, settings.upload_dir)
-                num_chunks = rag_service.index_pdf(
-                    pdf_path,
-                    pdf_name=uploaded_file.name,
-                    progress_callback=lambda progress, message: update_upload_progress(
-                        progress_bar, status_text, progress, message
-                    ),
-                )
-                st.success(f"Indexed {num_chunks} chunks from {uploaded_file.name}.")
-            except Exception as exc:  # noqa: BLE001
-                st.error(str(exc))
-
         st.subheader("Indexed PDFs")
         try:
             pdfs = rag_service.list_pdfs()
@@ -369,67 +345,164 @@ def main() -> None:
         render_chat_history_sidebar(history_store)
 
     st.title("Local RAG Assistant")
-    st.caption("Upload PDFs in the sidebar, then ask questions here.")
+    st.caption("Attach PDFs in the composer, then ask questions in the same send flow.")
 
-    state = get_history_state(history_store)
-    active_id = history_store.get_active_session_id(state)
-    active_session = history_store.get_session(state, active_id) if active_id else None
-    messages = list(active_session.get("messages") or []) if active_session else []
-
-    question = st.chat_input("Ask a question about your PDFs")
-    if question:
-        if not active_id:
-            active_id = history_store.create_session(state)
-        history_store.append_message(state, active_id, "user", question)
-
-        try:
-            available_pdfs = rag_service.list_pdfs()
-        except Exception as exc:  # noqa: BLE001
-            history_store.append_message(state, active_id, "assistant", f"Error loading indexed PDFs: {exc}")
-            persist_history_state(history_store, state)
-        else:
-            if not available_pdfs:
-                history_store.append_message(
-                    state,
-                    active_id,
-                    "assistant",
-                    "No PDFs are indexed yet. Upload a PDF and click Index PDF, then ask your question again.",
-                )
-                persist_history_state(history_store, state)
-            else:
-                assistant_index = history_store.append_message(state, active_id, "assistant", "")
-                persist_history_state(history_store, state)
-                handle = queue_manager.enqueue(
-                    generator_factory=lambda: rag_service.stream_answer(
-                        question, settings.top_k, history_store.get_session_messages(state, active_id)
-                    ),
-                    timeout_seconds=settings.request_timeout_seconds,
-                )
-                st.session_state["pending_handle"] = handle
-                st.session_state["pending_assistant_index"] = assistant_index
-                st.session_state["pending_session_id"] = active_id
-
-    state = get_history_state(history_store)
-    active_id = history_store.get_active_session_id(state)
-    active_session = history_store.get_session(state, active_id) if active_id else None
-    messages = list(active_session.get("messages") or []) if active_session else []
-
-    pending_index = st.session_state.get("pending_assistant_index")
-    pending_session_id = st.session_state.get("pending_session_id")
-    for idx, message in enumerate(messages):
-        if pending_session_id == active_id and pending_index is not None and idx == pending_index:
-            continue
-        render_chat_message(message["role"], message["content"])
+    chat_messages_container = st.container()
+    composer_status_container = st.container()
+    composer_container = st.container()
 
     pending_handle = st.session_state.get("pending_handle")
-    if pending_handle and pending_index is not None and pending_session_id == active_id:
-        stream_pending_response(
-            pending_handle,
-            queue_manager,
-            pending_index,
-            pending_session_id,
-            history_store,
+    composer_disabled = bool(st.session_state.get("composer_busy")) or pending_handle is not None
+
+    with composer_container:
+        submission = render_chat_composer(
+            disabled=composer_disabled,
+            upload_nonce=st.session_state.get("composer_upload_nonce", 0),
         )
+
+    if submission.submitted:
+        if not submission.question and not submission.files:
+            composer_status_container.warning("Attach at least one PDF or enter a question.")
+        else:
+            should_rerun = False
+            st.session_state["composer_busy"] = True
+            try:
+                state = get_history_state(history_store)
+                active_id = history_store.get_active_session_id(state)
+                if not active_id:
+                    active_id = history_store.create_session(state)
+
+                if submission.question:
+                    history_store.append_message(state, active_id, "user", submission.question)
+
+                if submission.files:
+                    upload_payloads: list[tuple[str, bytes]] = []
+                    for uploaded_file in submission.files:
+                        try:
+                            upload_payloads.append((uploaded_file.name, uploaded_file.getvalue()))
+                        except Exception as exc:  # noqa: BLE001
+                            history_store.append_message(
+                                state,
+                                active_id,
+                                "system",
+                                f'Failed to read "{uploaded_file.name}": {exc}',
+                            )
+
+                    if upload_payloads:
+                        with composer_status_container:
+                            progress_bar, status_text = create_upload_progress()
+                            results = rag_service.index_uploaded_files(
+                                upload_payloads,
+                                progress_callback=lambda _name, progress, message: update_upload_progress(
+                                    progress_bar,
+                                    status_text,
+                                    progress,
+                                    message,
+                                ),
+                            )
+
+                        indexed_count = 0
+                        failed_count = 0
+                        for result in results:
+                            if result.success:
+                                indexed_count += 1
+                                history_store.append_message(
+                                    state,
+                                    active_id,
+                                    "system",
+                                    f'Indexed "{result.file_name}" ({result.chunks_indexed} chunks).',
+                                )
+                            else:
+                                failed_count += 1
+                                history_store.append_message(
+                                    state,
+                                    active_id,
+                                    "system",
+                                    f'Failed to index "{result.file_name}": {result.error}',
+                                )
+
+                        if indexed_count:
+                            composer_status_container.success(f"Indexed {indexed_count} PDF file(s).")
+                        if failed_count:
+                            composer_status_container.warning(
+                                f"{failed_count} PDF file(s) failed indexing. See chat timeline for details."
+                            )
+
+                if submission.question:
+                    try:
+                        available_pdfs = rag_service.list_pdfs()
+                    except Exception as exc:  # noqa: BLE001
+                        history_store.append_message(
+                            state,
+                            active_id,
+                            "assistant",
+                            f"Error loading indexed PDFs: {exc}",
+                        )
+                    else:
+                        if not available_pdfs:
+                            history_store.append_message(
+                                state,
+                                active_id,
+                                "assistant",
+                                "No PDFs are indexed yet. Attach a valid PDF and send again.",
+                            )
+                        else:
+                            assistant_index = history_store.append_message(state, active_id, "assistant", "")
+                            persist_history_state(history_store, state)
+                            try:
+                                handle = queue_manager.enqueue(
+                                    generator_factory=lambda: rag_service.stream_answer(
+                                        submission.question,
+                                        settings.top_k,
+                                        history_store.get_session_messages(state, active_id),
+                                    ),
+                                    timeout_seconds=settings.request_timeout_seconds,
+                                )
+                            except Exception as exc:  # noqa: BLE001
+                                messages = history_store.get_session_messages(state, active_id)
+                                if 0 <= assistant_index < len(messages):
+                                    messages[assistant_index]["content"] = (
+                                        f"Error while queuing request: {exc}"
+                                    )
+                                    session = history_store.get_session(state, active_id)
+                                    if session is not None:
+                                        session["messages"] = messages
+                            else:
+                                st.session_state["pending_handle"] = handle
+                                st.session_state["pending_assistant_index"] = assistant_index
+                                st.session_state["pending_session_id"] = active_id
+
+                persist_history_state(history_store, state)
+                st.session_state["composer_upload_nonce"] = st.session_state.get("composer_upload_nonce", 0) + 1
+                should_rerun = True
+            finally:
+                st.session_state["composer_busy"] = False
+
+            if should_rerun:
+                st.rerun()
+
+    with chat_messages_container:
+        state = get_history_state(history_store)
+        active_id = history_store.get_active_session_id(state)
+        active_session = history_store.get_session(state, active_id) if active_id else None
+        messages = list(active_session.get("messages") or []) if active_session else []
+
+        pending_index = st.session_state.get("pending_assistant_index")
+        pending_session_id = st.session_state.get("pending_session_id")
+        for idx, message in enumerate(messages):
+            if pending_session_id == active_id and pending_index is not None and idx == pending_index:
+                continue
+            render_chat_message(message["role"], message["content"])
+
+        pending_handle = st.session_state.get("pending_handle")
+        if pending_handle and pending_index is not None and pending_session_id == active_id:
+            stream_pending_response(
+                pending_handle,
+                queue_manager,
+                pending_index,
+                pending_session_id,
+                history_store,
+            )
 
 
 if __name__ == "__main__":

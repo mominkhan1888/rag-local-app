@@ -1,6 +1,7 @@
 """RAG orchestration service for indexing and answering questions."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 import logging
 import threading
@@ -14,6 +15,18 @@ from core.pdf_processor import Chunk, PDFProcessor, ProgressCallback
 from core.vector_store import VectorStore, VectorStoreConfig
 
 logger = logging.getLogger(__name__)
+
+BatchProgressCallback = Callable[[str, float, str], None]
+
+
+@dataclass(frozen=True)
+class FileIndexResult:
+    """Result of indexing one uploaded PDF file."""
+
+    file_name: str
+    success: bool
+    chunks_indexed: int
+    error: str = ""
 
 
 class RAGService:
@@ -122,6 +135,88 @@ class RAGService:
         logger.info("Indexed PDF '%s' with %s chunks in %.2f seconds", pdf_name, added, elapsed)
         return added
 
+    def index_uploaded_files(
+        self,
+        files: List[tuple[str, bytes]],
+        progress_callback: BatchProgressCallback | None = None,
+    ) -> List[FileIndexResult]:
+        """Save and index uploaded files sequentially with partial-failure handling."""
+
+        if not files:
+            return []
+
+        results: List[FileIndexResult] = []
+        total_files = len(files)
+
+        for file_index, (file_name, file_bytes) in enumerate(files):
+            safe_name = Path(file_name).name.strip() or f"upload_{file_index + 1}.pdf"
+            file_path = self.settings.upload_dir / safe_name
+            base_progress = file_index / total_files
+
+            try:
+                with open(file_path, "wb") as file_handle:
+                    file_handle.write(file_bytes)
+            except Exception as exc:  # noqa: BLE001
+                error_message = f"Failed to save file: {exc}"
+                logger.exception("Failed to save upload %s", safe_name)
+                results.append(
+                    FileIndexResult(
+                        file_name=safe_name,
+                        success=False,
+                        chunks_indexed=0,
+                        error=error_message,
+                    )
+                )
+                if progress_callback:
+                    progress_callback(safe_name, (file_index + 1) / total_files, error_message)
+                continue
+
+            def _inner_progress(progress: float, message: str) -> None:
+                if not progress_callback:
+                    return
+                clamped = min(max(progress, 0.0), 1.0)
+                overall = base_progress + (clamped / total_files)
+                progress_callback(safe_name, overall, message)
+
+            try:
+                chunk_count = self.index_pdf(
+                    file_path=file_path,
+                    pdf_name=safe_name,
+                    progress_callback=_inner_progress,
+                )
+                results.append(
+                    FileIndexResult(
+                        file_name=safe_name,
+                        success=True,
+                        chunks_indexed=chunk_count,
+                    )
+                )
+                if progress_callback:
+                    progress_callback(
+                        safe_name,
+                        (file_index + 1) / total_files,
+                        f"Indexed {safe_name} ({chunk_count} chunks).",
+                    )
+            except Exception as exc:  # noqa: BLE001
+                error_message = str(exc)
+                logger.exception("Failed to index upload %s", safe_name)
+                results.append(
+                    FileIndexResult(
+                        file_name=safe_name,
+                        success=False,
+                        chunks_indexed=0,
+                        error=error_message,
+                    )
+                )
+                if progress_callback:
+                    progress_callback(
+                        safe_name,
+                        (file_index + 1) / total_files,
+                        f"Failed to index {safe_name}: {error_message}",
+                    )
+
+        return results
+
     def stream_answer(
         self,
         question: str,
@@ -148,7 +243,7 @@ class RAGService:
             def _no_context_stream() -> Iterator[str]:
                 yield (
                     "I don't have any indexed PDF content yet. "
-                    "Please upload a PDF and click Index PDF, then ask your question again."
+                    "Please attach a PDF in the chat composer and send again."
                 )
 
             return _no_context_stream()
@@ -175,10 +270,11 @@ class RAGService:
             if not isinstance(item, dict):
                 continue
             role = str(item.get("role", "")).strip()
+            role_lower = role.lower()
             content = str(item.get("content", "")).strip()
-            if not role or not content:
+            if role_lower not in {"user", "assistant"} or not content:
                 continue
-            cleaned.append({"role": role, "content": content})
+            cleaned.append({"role": role_lower, "content": content})
 
         if cleaned and cleaned[-1]["role"].lower() == "assistant" and not cleaned[-1]["content"].strip():
             cleaned = cleaned[:-1]
