@@ -179,11 +179,8 @@ class RAGService:
                 progress_callback(safe_name, overall, message)
 
             try:
-                chunk_count = self.index_pdf(
-                    file_path=file_path,
-                    pdf_name=safe_name,
-                    progress_callback=_inner_progress,
-                )
+                # Use positional args to avoid keyword drift if parameter names evolve.
+                chunk_count = self.index_pdf(file_path, safe_name, progress_callback=_inner_progress)
                 results.append(
                     FileIndexResult(
                         file_name=safe_name,

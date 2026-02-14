@@ -21,7 +21,7 @@ class RAGServiceTests(unittest.TestCase):
 
             indexed_names: list[str] = []
 
-            def fake_index(file_path: Path, pdf_name: str, progress_callback=None) -> int:
+            def fake_index(pdf_path: Path, pdf_name: str, progress_callback=None) -> int:
                 indexed_names.append(pdf_name)
                 if progress_callback:
                     progress_callback(1.0, f"done {pdf_name}")
@@ -63,7 +63,7 @@ class RAGServiceTests(unittest.TestCase):
 
             calls: list[str] = []
 
-            def fake_index(file_path: Path, pdf_name: str, progress_callback=None) -> int:
+            def fake_index(pdf_path: Path, pdf_name: str, progress_callback=None) -> int:
                 calls.append(pdf_name)
                 return 1
 
