@@ -67,7 +67,7 @@ def load_streamlit_secrets() -> dict:
         return {}
 
 
-def get_cached_ollama_health(base_url: str) -> tuple[bool, str]:
+def get_cached_ollama_health(base_url: str, api_key: str = "") -> tuple[bool, str]:
     """Check Ollama health with short-lived caching per session."""
 
     now = time.time()
@@ -75,13 +75,15 @@ def get_cached_ollama_health(base_url: str) -> tuple[bool, str]:
     if (
         isinstance(cached, dict)
         and cached.get("base_url") == base_url
+        and cached.get("api_key_hash") == hash(api_key)
         and (now - float(cached.get("checked_at", 0))) < 15
     ):
         return bool(cached.get("ok")), str(cached.get("reason", ""))
 
-    ok, reason = check_ollama_health(base_url)
+    ok, reason = check_ollama_health(base_url, api_key=api_key)
     st.session_state["ollama_health"] = {
         "base_url": base_url,
+        "api_key_hash": hash(api_key),
         "checked_at": now,
         "ok": ok,
         "reason": reason,
@@ -95,7 +97,7 @@ def guard_ollama_runtime(settings: Settings, running_in_cloud: bool) -> None:
     if settings.llm_provider.lower() != "ollama":
         return
 
-    is_healthy, reason = get_cached_ollama_health(settings.ollama_base_url)
+    is_healthy, reason = get_cached_ollama_health(settings.ollama_base_url, settings.ollama_api_key)
     if is_healthy:
         return
 
@@ -296,8 +298,9 @@ def main() -> None:
         st.error("Configuration error")
         st.error(str(exc))
         st.info(
-            "For Streamlit Cloud, set secrets for OPENAI_BASE_URL, OPENAI_MODEL, and "
-            "OPENAI_API_KEY (or OPENROUTER_API_KEY), plus optionally LLM_PROVIDER=openrouter."
+            "For Streamlit Cloud, set LLM_PROVIDER=groq/openrouter and provide "
+            "OPENAI_BASE_URL, OPENAI_MODEL, and OPENAI_API_KEY "
+            "(aliases: GROQ_API_KEY or OPENROUTER_API_KEY)."
         )
         st.stop()
 

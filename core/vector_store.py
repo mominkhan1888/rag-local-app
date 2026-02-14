@@ -113,7 +113,9 @@ class VectorStore:
         """Delete all chunks for a given PDF name."""
 
         try:
-            data = self._collection.get(include=["ids", "metadatas"])
+            # Chroma's `ids` are always returned. Passing "ids" in include raises
+            # a ValueError in 0.4.x, so request only supported include fields.
+            data = self._collection.get(include=["metadatas"])
             ids = data.get("ids") or []
             metadatas = data.get("metadatas") or []
 

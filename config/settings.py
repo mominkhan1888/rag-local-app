@@ -36,6 +36,7 @@ class Settings:
     chroma_db_path: Path
     upload_dir: Path
     ollama_base_url: str
+    ollama_api_key: str
     top_k: int
     request_timeout_seconds: int
     embedding_batch_size: int
@@ -170,7 +171,6 @@ def is_cloud_runtime(secrets: Mapping[str, Any] | None = None) -> bool:
 
 def _resolve_llm_provider(
     provider: str | None,
-    openai_api_key: str,
     secrets: Mapping[str, Any] | None = None,
 ) -> str:
     """Resolve provider from env with cloud-aware defaults."""
@@ -178,8 +178,24 @@ def _resolve_llm_provider(
     if provider and provider.strip():
         return provider.strip().lower()
 
-    # If user provided an OpenAI-compatible key but not provider, default to openrouter.
-    if openai_api_key.strip():
+    groq_api_key = _read_setting("GROQ_API_KEY", "", secrets).strip()
+    if groq_api_key:
+        return "groq"
+
+    openrouter_api_key = _read_setting("OPENROUTER_API_KEY", "", secrets).strip()
+    if openrouter_api_key:
+        return "openrouter"
+
+    openai_base_url = _read_setting("OPENAI_BASE_URL", "", secrets).strip().lower()
+    if "api.groq.com" in openai_base_url:
+        return "groq"
+    if "openrouter.ai" in openai_base_url:
+        return "openrouter"
+
+    # Generic OpenAI-compatible API key without explicit provider:
+    # default to OpenRouter because it's our broadest compatibility path.
+    openai_api_key = _read_setting("OPENAI_API_KEY", "", secrets).strip()
+    if openai_api_key:
         return "openrouter"
 
     if is_cloud_runtime(secrets):
@@ -215,7 +231,6 @@ def get_settings(secrets: Mapping[str, Any] | None = None) -> Settings:
     openai_api_key = _read_setting("OPENAI_API_KEY", "", normalized_secrets).strip()
     provider = _resolve_llm_provider(
         _read_setting("LLM_PROVIDER", "", normalized_secrets),
-        openai_api_key,
         normalized_secrets,
     )
 
@@ -245,6 +260,7 @@ def get_settings(secrets: Mapping[str, Any] | None = None) -> Settings:
             DATA_DIR / "uploads",
         ),
         ollama_base_url=_read_setting("OLLAMA_BASE_URL", "http://localhost:11434", normalized_secrets).strip(),
+        ollama_api_key=_read_setting("OLLAMA_API_KEY", "", normalized_secrets).strip(),
         top_k=_read_int_setting("TOP_K", 4, normalized_secrets),
         request_timeout_seconds=_read_int_setting("REQUEST_TIMEOUT_SECONDS", 180, normalized_secrets),
         embedding_batch_size=_read_int_setting("EMBEDDING_BATCH_SIZE", 32, normalized_secrets),
@@ -266,6 +282,8 @@ def validate_settings(settings: Settings) -> None:
             missing.append("OLLAMA_BASE_URL")
         if not settings.model_name.strip():
             missing.append("MODEL_NAME")
+        if "ollama.com" in settings.ollama_base_url.strip().lower() and not settings.ollama_api_key.strip():
+            missing.append("OLLAMA_API_KEY")
         if missing:
             raise ValueError(
                 f"Missing required settings for provider 'ollama': {', '.join(missing)}"

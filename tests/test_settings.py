@@ -44,6 +44,7 @@ class SettingsTests(unittest.TestCase):
             "CHROMA_DB_PATH",
             "UPLOAD_DIR",
             "OLLAMA_BASE_URL",
+            "OLLAMA_API_KEY",
             "TOP_K",
             "REQUEST_TIMEOUT_SECONDS",
             "EMBEDDING_BATCH_SIZE",
@@ -104,6 +105,20 @@ class SettingsTests(unittest.TestCase):
         settings = settings_module.get_settings()
         settings_module.validate_settings(settings)
 
+    def test_validate_settings_ollama_cloud_requires_key(self) -> None:
+        """Hosted Ollama endpoints should require OLLAMA_API_KEY."""
+
+        self._clear_app_env()
+        os.environ["LLM_PROVIDER"] = "ollama"
+        os.environ["OLLAMA_BASE_URL"] = "https://ollama.com"
+        os.environ["MODEL_NAME"] = "llama3.2:3b"
+
+        settings = settings_module.get_settings()
+        with self.assertRaises(ValueError) as error:
+            settings_module.validate_settings(settings)
+
+        self.assertIn("OLLAMA_API_KEY", str(error.exception))
+
     def test_provider_defaults_openrouter_when_openai_key_exists(self) -> None:
         """Provider should default to OpenRouter when API key is present."""
 
@@ -113,6 +128,16 @@ class SettingsTests(unittest.TestCase):
         settings = settings_module.get_settings()
 
         self.assertEqual(settings.llm_provider, "openrouter")
+
+    def test_provider_defaults_groq_when_groq_key_exists(self) -> None:
+        """Provider should default to Groq when GROQ_API_KEY is present."""
+
+        self._clear_app_env()
+        os.environ["GROQ_API_KEY"] = "groq-key"
+
+        settings = settings_module.get_settings()
+
+        self.assertEqual(settings.llm_provider, "groq")
 
     def test_get_settings_reads_explicit_secrets_mapping(self) -> None:
         """Settings should read values passed from Streamlit secrets."""

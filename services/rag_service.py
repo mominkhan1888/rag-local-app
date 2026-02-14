@@ -33,6 +33,7 @@ class RAGService:
                 base_url=settings.ollama_base_url,
                 model=settings.model_name,
                 request_timeout_seconds=settings.request_timeout_seconds,
+                api_key=settings.ollama_api_key,
             )
         else:
             model = settings.openai_model

@@ -10,13 +10,26 @@ import requests
 logger = logging.getLogger(__name__)
 
 
-def check_ollama_health(base_url: str, timeout_seconds: int = 3) -> tuple[bool, str]:
+def _build_ollama_headers(api_key: str | None = None) -> Dict[str, str] | None:
+    """Build optional auth headers for Ollama cloud endpoints."""
+
+    if api_key and api_key.strip():
+        return {"Authorization": f"Bearer {api_key.strip()}"}
+    return None
+
+
+def check_ollama_health(
+    base_url: str,
+    timeout_seconds: int = 3,
+    api_key: str | None = None,
+) -> tuple[bool, str]:
     """Check whether an Ollama server is reachable."""
 
     clean_base_url = base_url.rstrip("/")
     try:
         response = requests.get(
             f"{clean_base_url}/api/tags",
+            headers=_build_ollama_headers(api_key),
             timeout=(2, timeout_seconds),
         )
         response.raise_for_status()
@@ -74,12 +87,19 @@ class BaseLLMClient:
 class OllamaClient(BaseLLMClient):
     """Client for streaming responses from a local Ollama server."""
 
-    def __init__(self, base_url: str, model: str, request_timeout_seconds: int) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        request_timeout_seconds: int,
+        api_key: str = "",
+    ) -> None:
         """Initialize the client with endpoint configuration."""
 
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.request_timeout_seconds = request_timeout_seconds
+        self.api_key = api_key
 
     def stream_answer(
         self,
@@ -101,6 +121,7 @@ class OllamaClient(BaseLLMClient):
             response = requests.post(
                 f"{self.base_url}/api/generate",
                 json=payload,
+                headers=_build_ollama_headers(self.api_key),
                 stream=True,
                 timeout=(5, self.request_timeout_seconds),
             )
@@ -110,7 +131,8 @@ class OllamaClient(BaseLLMClient):
             raise RuntimeError(
                 "Failed to connect to Ollama at "
                 f"{self.base_url}. Start Ollama locally, or set an internet provider "
-                "(LLM_PROVIDER=openrouter + OPENAI_* settings) for cloud deployment."
+                "(LLM_PROVIDER=openrouter/groq + OPENAI_* settings) for cloud deployment. "
+                "If using Ollama cloud, set OLLAMA_API_KEY."
             ) from exc
 
         try:

@@ -32,6 +32,16 @@ streamlit run app.py --server.address 0.0.0.0 --server.port 8501
 ## Deploy On Streamlit Cloud
 `python-dotenv` is optional in cloud. Streamlit Cloud should use app secrets/environment variables.
 
+### Recommended (Free Tier): Groq
+Set these in **Streamlit Cloud > App settings > Secrets**:
+```toml
+LLM_PROVIDER="groq"
+OPENAI_BASE_URL="https://api.groq.com/openai/v1"
+OPENAI_API_KEY="YOUR_GROQ_KEY"
+OPENAI_MODEL="llama-3.1-8b-instant"
+```
+
+### Alternative: OpenRouter (Free Models)
 Set these in **Streamlit Cloud > App settings > Secrets**:
 ```toml
 LLM_PROVIDER="openrouter"
@@ -44,6 +54,9 @@ Alias keys are also supported:
 - `OPENROUTER_API_KEY` (instead of `OPENAI_API_KEY`)
 - `OPENROUTER_BASE_URL` (instead of `OPENAI_BASE_URL`)
 - `OPENROUTER_MODEL` (instead of `OPENAI_MODEL`)
+- `GROQ_API_KEY` (instead of `OPENAI_API_KEY`)
+- `GROQ_BASE_URL` (instead of `OPENAI_BASE_URL`)
+- `GROQ_MODEL` (instead of `OPENAI_MODEL`)
 
 Nested secrets are supported too, for example:
 ```toml
@@ -106,6 +119,7 @@ http://192.168.1.25:8501
 ## Troubleshooting
 - **Ollama not running**: Start Ollama and re-try. Verify `http://localhost:11434` is reachable.
 - **`Failed to connect to Ollama` on Streamlit Cloud**: Cloud cannot access your local Ollama. Set the OpenRouter secrets above and reboot the app.
+- **Ollama API key note**: Local Ollama does **not** require a key. `OLLAMA_API_KEY` is only for hosted Ollama endpoints (example: `https://ollama.com`).
 - **`Missing required settings ... OPENAI_API_KEY`**: Add `OPENAI_API_KEY` (or `OPENROUTER_API_KEY`) in Streamlit Cloud Secrets, then reboot the app.
 - **Model missing**: Run `ollama pull llama3.2:3b`.
 - **Slow indexing**: Large PDFs can take 30-60 seconds; this is expected for 500 pages.
